@@ -74,7 +74,7 @@ def main(args):
 
         if 'http' in args.distil_model_path or 'https' in args.distil_model_path:
             # load from a url
-            torch.hub._download_url_to_file(
+            torch.hub.download_url_to_file(
                 url=args.distil_model_path,
                 dst="checkpoint.pth"
             )
