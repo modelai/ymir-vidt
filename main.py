@@ -5,25 +5,26 @@
 # Additionally modified by NAVER Corp. for ViDT
 # ------------------------------------------------------------------------
 
-import os
+import argparse
 import datetime
 import json
+import os
 import random
+import resource
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
-import resource
+
 import datasets
 import util.misc as utils
+from arguments import get_args_parser
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch, train_one_epoch_with_teacher
 from methods import build_model
 from util.scheduler import create_scheduler
-from arguments import get_args_parser
-import argparse
 
 
 def build_distil_model(args):
@@ -40,9 +41,8 @@ def main(args):
     # Gradient accumulation setup
     if args.n_iter_to_acc > 1:
         if args.batch_size % args.n_iter_to_acc != 0:
-            print("Not supported divisor for acc grade.")
-            import sys
-            sys.exit(1)
+            raise Exception(f"Not supported divisor for acc grade with batch size {args.batch_size} and n_iter_to_acc {args.n_iter_to_acc}")
+
         print("Gradient Accumulation is applied.")
         print("The batch: ", args.batch_size, "->", int(args.batch_size / args.n_iter_to_acc),
               'but updated every ', args.n_iter_to_acc, 'steps.')
@@ -51,7 +51,7 @@ def main(args):
 
     # distributed data parallel setup
     utils.init_distributed_mode(args)
-    print("git:\n  {}\n".format(utils.get_sha()))
+    # print("git:\n  {}\n".format(utils.get_sha()))
     print(args)
 
     device = torch.device(args.device)
@@ -74,11 +74,13 @@ def main(args):
 
         if 'http' in args.distil_model_path or 'https' in args.distil_model_path:
             # load from a url
-            torch.hub.download_url_to_file(
-                url=args.distil_model_path,
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url=args.distil_model_path
+            filename = os.path.basename(url)
+            model_dir = '/out'
+            filepath = os.path.join(model_dir, filename)
+            if not os.path.exists(filepath):
+                torch.hub.download_url_to_file(url=url, dst=filepath)
+            checkpoint = torch.load(filepath, map_location='cpu')
             teacher_model.load_state_dict(checkpoint["model"])
         else:
             # load from a local path
@@ -141,8 +143,7 @@ def main(args):
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
     # build data loader
-    dataset_train = build_dataset(image_set='train', args=args)
-    dataset_val = build_dataset(image_set='val', args=args)
+    dataset_train, dataset_val = build_dataset(image_set=['train', 'val'], args=args)
     print("# train:", len(dataset_train), ", # val", len(dataset_val))
 
     # data samplers

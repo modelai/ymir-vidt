@@ -25,11 +25,12 @@ import datasets.transforms as T
 #         c1, c2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
 #         cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
 #     cv2.imwrite(file_path, img)
-    
+
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, return_masks):
+    def __init__(self, image_set, img_folder, ann_file, transforms, return_masks):
         super(CocoDetection, self).__init__(img_folder, ann_file)
+        self.image_set = image_set
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
 

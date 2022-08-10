@@ -110,6 +110,9 @@ def build(args):
     if args.dataset_file == 'coco':
         num_classes = 91
 
+    if args.dataset_file == 'ymir':
+        num_classes = args.num_classes
+
     if args.dataset_file == "coco_panoptic":
         num_classes = 250
     device = torch.device(args.device)

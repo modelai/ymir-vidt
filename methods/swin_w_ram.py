@@ -8,11 +8,13 @@
 # --------------------------------------------------------
 
 import math
+import os
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-import numpy as np
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
 
@@ -35,6 +37,7 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
+
 
 def masked_sin_pos_encoding(x, mask, num_pos_feats, temperature=10000, scale=2 * math.pi):
     """ Masked Sinusoidal Positional Encoding
@@ -66,8 +69,10 @@ def masked_sin_pos_encoding(x, mask, num_pos_feats, temperature=10000, scale=2 *
     pos_x = x_embed[:, :, :, None] / dim_t
     pos_y = y_embed[:, :, :, None] / dim_t
 
-    pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
-    pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
+    pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(),
+                        pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
+    pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(),
+                        pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
     pos = torch.cat((pos_y, pos_x), dim=3)
 
     return pos
@@ -83,8 +88,10 @@ def window_partition(x, window_size):
         windows: (num_windows*B, window_size, window_size, C)
     """
     B, H, W, C = x.shape
-    x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
+    x = x.view(B, H // window_size, window_size,
+               W // window_size, window_size, C)
+    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous(
+    ).view(-1, window_size, window_size, C)
     return windows
 
 
@@ -100,7 +107,8 @@ def window_reverse(windows, window_size, H, W):
         x: (B, H, W, C)
     """
     B = int(windows.shape[0] / (H * W / window_size / window_size))
-    x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
+    x = windows.view(B, H // window_size, W // window_size,
+                     window_size, window_size, -1)
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
     return x
 
@@ -143,13 +151,17 @@ class ReconfiguredAttentionModule(nn.Module):
         coords_w = torch.arange(self.window_size[1])
         coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
-        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
-        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-        relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
+        relative_coords = coords_flatten[:, :, None] - \
+            coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
+        relative_coords = relative_coords.permute(
+            1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
+        relative_coords[:, :, 0] += self.window_size[0] - \
+            1  # shift to start from 0
         relative_coords[:, :, 1] += self.window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
         relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        self.register_buffer("relative_position_index", relative_position_index)
+        self.register_buffer("relative_position_index",
+                             relative_position_index)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -158,7 +170,6 @@ class ReconfiguredAttentionModule(nn.Module):
 
         trunc_normal_(self.relative_position_bias_table, std=.02)
         self.softmax = nn.Softmax(dim=-1)
-
 
     def forward(self, x, det, mask=None, cross_attn=False, cross_attn_mask=None):
         """ Forward function.
@@ -201,13 +212,16 @@ class ReconfiguredAttentionModule(nn.Module):
             x = torch.cat([shifted_x, cross_x, det], dim=1)
             full_qkv = self.qkv(x)
             patch_qkv, cross_patch_qkv, det_qkv = \
-                full_qkv[:, :N, :], full_qkv[:, N:N + ori_N, :], full_qkv[:, N + ori_N:, :]
+                full_qkv[:, :N, :], full_qkv[:, N:N +
+                                             ori_N, :], full_qkv[:, N + ori_N:, :]
         patch_qkv = patch_qkv.view(B, H, W, -1)
 
         # window partitioning for [PATCH] tokens
-        patch_qkv = window_partition(patch_qkv, window_size)  # nW*B, window_size, window_size, C
+        # nW*B, window_size, window_size, C
+        patch_qkv = window_partition(patch_qkv, window_size)
         B_ = patch_qkv.shape[0]
-        patch_qkv = patch_qkv.reshape(B_, window_size * window_size, 3, self.num_heads, C // self.num_heads)
+        patch_qkv = patch_qkv.reshape(
+            B_, window_size * window_size, 3, self.num_heads, C // self.num_heads)
         _patch_qkv = patch_qkv.permute(2, 0, 3, 1, 4)
         patch_q, patch_k, patch_v = _patch_qkv[0], _patch_qkv[1], _patch_qkv[2]
 
@@ -217,19 +231,22 @@ class ReconfiguredAttentionModule(nn.Module):
         # add relative pos bias for [patch x patch] self-attention
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
             self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
-        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        relative_position_bias = relative_position_bias.permute(
+            2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
         patch_attn = patch_attn + relative_position_bias.unsqueeze(0)
 
         # if shifted window is used, it needs to apply the mask
         if mask is not None:
             nW = mask.shape[0]
             patch_attn = patch_attn.view(B_ // nW, nW, self.num_heads, local_map_size, local_map_size) + \
-                         mask.unsqueeze(1).unsqueeze(0)
-            patch_attn = patch_attn.view(-1, self.num_heads, local_map_size, local_map_size)
+                mask.unsqueeze(1).unsqueeze(0)
+            patch_attn = patch_attn.view(-1, self.num_heads,
+                                         local_map_size, local_map_size)
 
         patch_attn = self.softmax(patch_attn)
         patch_attn = self.attn_drop(patch_attn)
-        patch_x = (patch_attn @ patch_v).transpose(1, 2).reshape(B_, window_size, window_size, C)
+        patch_x = (patch_attn @ patch_v).transpose(1,
+                                                   2).reshape(B_, window_size, window_size, C)
 
         # extract qkv for [DET] tokens
         det_qkv = det_qkv.view(B, -1, 3, self.num_heads, C // self.num_heads)
@@ -240,15 +257,18 @@ class ReconfiguredAttentionModule(nn.Module):
         if cross_attn:
 
             # reconstruct the spatial form of [PATCH] tokens for global [DET x PATCH] attention
-            cross_patch_qkv = cross_patch_qkv.view(B, ori_H, ori_W, 3, self.num_heads, C // self.num_heads)
-            patch_kv = cross_patch_qkv[:, :, :, 1:, :, :].permute(3, 0, 4, 1, 2, 5).contiguous()
+            cross_patch_qkv = cross_patch_qkv.view(
+                B, ori_H, ori_W, 3, self.num_heads, C // self.num_heads)
+            patch_kv = cross_patch_qkv[:, :, :, 1:, :, :].permute(
+                3, 0, 4, 1, 2, 5).contiguous()
             patch_kv = patch_kv.view(2, B, self.num_heads, ori_H * ori_W, -1)
 
             # extract "key and value" of [PATCH] tokens for cross-attention
             cross_patch_k, cross_patch_v = patch_kv[0], patch_kv[1]
 
             # bind key and value of [PATCH] and [DET] tokens for [DET X [PATCH, DET]] attention
-            det_k, det_v = torch.cat([cross_patch_k, det_k], dim=2), torch.cat([cross_patch_v, det_v], dim=2)
+            det_k, det_v = torch.cat([cross_patch_k, det_k], dim=2), torch.cat(
+                [cross_patch_v, det_v], dim=2)
 
         # [DET x DET] self-attention or binded [DET x [PATCH, DET]] attention
         det_q = det_q * self.scale
@@ -309,10 +329,12 @@ class SwinTransformerBlock(nn.Module):
             dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
 
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path = DropPath(
+            drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
+                       act_layer=act_layer, drop=drop)
 
         self.H = None
         self.W = None
@@ -358,7 +380,8 @@ class SwinTransformerBlock(nn.Module):
 
         # cyclic shift
         if self.shift_size > 0:
-            shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
+            shifted_x = torch.roll(
+                x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
             attn_mask = mask_matrix
         else:
             shifted_x = x
@@ -385,7 +408,8 @@ class SwinTransformerBlock(nn.Module):
 
         # reverse cyclic shift
         if self.shift_size > 0:
-            x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
+            x = torch.roll(shifted_x, shifts=(
+                self.shift_size, self.shift_size), dims=(1, 2))
         else:
             x = shifted_x
 
@@ -518,16 +542,17 @@ class BasicLayer(nn.Module):
                 qk_scale=qk_scale,
                 drop=drop,
                 attn_drop=attn_drop,
-                drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                drop_path=drop_path[i] if isinstance(
+                    drop_path, list) else drop_path,
                 norm_layer=norm_layer)
             for i in range(depth)])
 
         # patch merging layer
         if downsample is not None:
-            self.downsample = downsample(dim=dim, norm_layer=norm_layer, expand=(not last))
+            self.downsample = downsample(
+                dim=dim, norm_layer=norm_layer, expand=(not last))
         else:
             self.downsample = None
-
 
     def forward(self, x, H, W, det_pos, input_mask, cross_attn=False):
         """ Forward function.
@@ -560,16 +585,19 @@ class BasicLayer(nn.Module):
 
         # mask for cyclic shift
         mask_windows = window_partition(img_mask, self.window_size)
-        mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
+        mask_windows = mask_windows.view(-1,
+                                         self.window_size * self.window_size)
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+        attn_mask = attn_mask.masked_fill(
+            attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
         # compute sinusoidal pos encoding and cross-attn mask here to avoid redundant computation
         if cross_attn:
 
             _H, _W = input_mask.shape[1:]
             if not (_H == H and _W == W):
-                input_mask = F.interpolate(input_mask[None].float(), size=(H, W)).to(torch.bool)[0]
+                input_mask = F.interpolate(
+                    input_mask[None].float(), size=(H, W)).to(torch.bool)[0]
 
             # sinusoidal pos encoding for [PATCH] tokens used in cross-attention
             patch_pos = masked_sin_pos_encoding(x, input_mask, self.dim)
@@ -581,8 +609,10 @@ class BasicLayer(nn.Module):
                 masked_fill(cross_attn_mask == 0.0, float(0.0))
 
             # pad for detection token (this padding is required to process the binded [PATCH, DET] attention
-            cross_attn_mask = cross_attn_mask.view(B, H * W).unsqueeze(1).unsqueeze(2)
-            cross_attn_mask = F.pad(cross_attn_mask, (0, self.det_token_num), value=0)
+            cross_attn_mask = cross_attn_mask.view(
+                B, H * W).unsqueeze(1).unsqueeze(2)
+            cross_attn_mask = F.pad(
+                cross_attn_mask, (0, self.det_token_num), value=0)
 
         else:
             patch_pos = None
@@ -598,7 +628,7 @@ class BasicLayer(nn.Module):
             if cross_attn:
                 _cross_attn = True
                 _cross_attn_mask = cross_attn_mask
-                _pos = pos # i.e., (patch_pos, det_pos)
+                _pos = pos  # i.e., (patch_pos, det_pos)
             else:
                 _cross_attn = False
                 _cross_attn_mask = None
@@ -645,7 +675,8 @@ class PatchEmbed(nn.Module):
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(in_chans, embed_dim,
+                              kernel_size=patch_size, stride=patch_size)
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
@@ -659,7 +690,8 @@ class PatchEmbed(nn.Module):
         if W % self.patch_size[1] != 0:
             x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
         if H % self.patch_size[0] != 0:
-            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
+            x = F.pad(
+                x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
 
         x = self.proj(x)  # B C Wh Ww
         if self.norm is not None:
@@ -717,7 +749,8 @@ class SwinTransformer(nn.Module):
                  norm_layer=nn.LayerNorm,
                  ape=False,
                  patch_norm=True,
-                 out_indices=[1, 2, 3], # not used in the current version, please ignore.
+                 # not used in the current version, please ignore.
+                 out_indices=[1, 2, 3],
                  frozen_stages=-1,
                  use_checkpoint=False):
         super().__init__()
@@ -739,15 +772,18 @@ class SwinTransformer(nn.Module):
         if self.ape:
             pretrain_img_size = to_2tuple(pretrain_img_size)
             patch_size = to_2tuple(patch_size)
-            patches_resolution = [pretrain_img_size[0] // patch_size[0], pretrain_img_size[1] // patch_size[1]]
+            patches_resolution = [
+                pretrain_img_size[0] // patch_size[0], pretrain_img_size[1] // patch_size[1]]
 
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1]))
+            self.absolute_pos_embed = nn.Parameter(torch.zeros(
+                1, embed_dim, patches_resolution[0], patches_resolution[1]))
             trunc_normal_(self.absolute_pos_embed, std=.02)
 
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         # stochastic depth
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate,
+                                                sum(depths))]  # stochastic depth decay rule
 
         # build layers
         self.layers = nn.ModuleList()
@@ -765,13 +801,15 @@ class SwinTransformer(nn.Module):
                 drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
                 norm_layer=norm_layer,
                 # modified by ViDT
-                downsample=PatchMerging if (i_layer < self.num_layers) else None,
+                downsample=PatchMerging if (
+                    i_layer < self.num_layers) else None,
                 last=None if (i_layer < self.num_layers-1) else True,
                 #
                 use_checkpoint=use_checkpoint)
             self.layers.append(layer)
 
-        num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]
+        num_features = [int(embed_dim * 2 ** i)
+                        for i in range(self.num_layers)]
         self.num_features = num_features
 
         # add a norm layer for each output
@@ -821,7 +859,8 @@ class SwinTransformer(nn.Module):
 
         # how many object we detect?
         self.det_token_num = det_token_num
-        self.det_token = nn.Parameter(torch.zeros(1, det_token_num, self.num_features[0]))
+        self.det_token = nn.Parameter(torch.zeros(
+            1, det_token_num, self.num_features[0]))
         self.det_token = trunc_normal_(self.det_token, std=.02)
 
         # dim size of pos encoding
@@ -833,9 +872,11 @@ class SwinTransformer(nn.Module):
         self.det_pos_embed = torch.nn.Parameter(det_pos_embed)
 
         # info for detection
-        self.num_channels = [self.num_features[i+1] for i in range(len(self.num_features)-1)]
+        self.num_channels = [self.num_features[i+1]
+                             for i in range(len(self.num_features)-1)]
         if method == 'vidt':
-            self.num_channels.append(self.pos_dim) # default: 256 (same to the default pos_dim)
+            # default: 256 (same to the default pos_dim)
+            self.num_channels.append(self.pos_dim)
         self.cross_indices = cross_indices
         # divisor to reduce the spatial size of the mask
         self.mask_divisor = 2 ** (len(self.layers) - len(self.cross_indices))
@@ -887,7 +928,7 @@ class SwinTransformer(nn.Module):
 
         # prepare a mask for cross attention
         mask = F.interpolate(mask[None].float(),
-                     size=(Wh // self.mask_divisor, Ww // self.mask_divisor)).to(torch.bool)[0]
+                             size=(Wh // self.mask_divisor, Ww // self.mask_divisor)).to(torch.bool)[0]
 
         patch_outs = []
         for stage in range(self.num_layers):
@@ -906,11 +947,13 @@ class SwinTransformer(nn.Module):
                                            det_pos=det_pos,
                                            cross_attn=cross_attn)
 
-            x, det_token = x[:, :-self.det_token_num, :], x[:, -self.det_token_num:, :]
+            x, det_token = x[:, :-self.det_token_num,
+                             :], x[:, -self.det_token_num:, :]
 
             # Aggregate intermediate outputs
             if stage > 0:
-                patch_out = x_out[:, :-self.det_token_num, :].view(B, H, W, -1).permute(0, 3, 1, 2)
+                patch_out = x_out[:, :-self.det_token_num,
+                                  :].view(B, H, W, -1).permute(0, 3, 1, 2)
                 patch_outs.append(patch_out)
 
         # patch token reduced from last stage output
@@ -935,9 +978,24 @@ class SwinTransformer(nn.Module):
         flops += self.patch_embed.flops()
         for i, layer in enumerate(self.layers):
             flops += layer.flops()
-        flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
+        flops += self.num_features * \
+            self.patches_resolution[0] * \
+            self.patches_resolution[1] // (2 ** self.num_layers)
         flops += self.num_features * self.num_classes
         return flops
+
+
+def load_state_dict_from_url(url, model_dir, map_location):
+    """
+    for pytorch 1.6, the torch.hub.load_state_dict_from_url not work,
+    view https://github.com/open-mmlab/mmsegmentation/issues/687 for details
+    """
+    filename = os.path.basename(url)
+    filepath = os.path.join(model_dir, filename)
+
+    if not os.path.exists(filepath):
+        torch.hub.download_url_to_file(url=url, dst=filepath)
+    return torch.load(filepath, map_location=map_location)
 
 
 def swin_nano(pretrained=None, **kwargs):
@@ -949,11 +1007,11 @@ def swin_nano(pretrained=None, **kwargs):
 
     if pretrained is not None:
         if pretrained == 'imagenet':
-            torch.hub.download_url_to_file(
-                    url="https://github.com/naver-ai/vidt/releases/download/v0.1-swin/swin_nano_patch4_window7_224.pth",
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url = "https://github.com/naver-ai/vidt/releases/download/v0.1-swin/swin_nano_patch4_window7_224.pth"
+            checkpoint = load_state_dict_from_url(url=url,
+                                                  model_dir="/out",
+                                                  map_location="cpu")
+
             model.load_state_dict(checkpoint["model"], strict=False)
             print('Load the backbone pretrained on ImageNet 1K')
 
@@ -974,11 +1032,11 @@ def swin_tiny(pretrained=None, **kwargs):
 
     if pretrained is not None:
         if pretrained == 'imagenet':
-            torch.hub.download_url_to_file(
-                url="https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth",
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url = "https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth"
+
+            checkpoint = load_state_dict_from_url(url=url,
+                                                  model_dir="/out",
+                                                  map_location="cpu")
             model.load_state_dict(checkpoint["model"], strict=False)
             print('Load the backbone pretrained on ImageNet 1K')
         else:
@@ -997,11 +1055,10 @@ def swin_small(pretrained=None, **kwargs):
 
     if pretrained is not None:
         if pretrained == 'imagenet':
-            torch.hub.download_url_to_file(
-                url="https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_small_patch4_window7_224.pth",
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url = "https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_small_patch4_window7_224.pth"
+            checkpoint = load_state_dict_from_url(url=url,
+                                                  model_dir="/out",
+                                                  map_location="cpu")
             model.load_state_dict(checkpoint["model"], strict=False)
             print('Load the backbone pretrained on ImageNet 1K')
         else:
@@ -1020,11 +1077,10 @@ def swin_base_win7(pretrained=None, **kwargs):
 
     if pretrained is not None:
         if pretrained == 'imagenet':
-            torch.hub.download_url_to_file(
-                url="https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_base_patch4_window7_224_22k.pth",
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url = "https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_base_patch4_window7_224_22k.pth"
+            checkpoint = load_state_dict_from_url(url=url,
+                                                  model_dir="/out",
+                                                  map_location="cpu")
             model.load_state_dict(checkpoint["model"], strict=False)
             print('Load the backbone pretrained on ImageNet 22K')
         else:
@@ -1043,11 +1099,11 @@ def swin_large_win7(pretrained=None, **kwargs):
 
     if pretrained is not None:
         if pretrained == 'imagenet':
-            torch.hub.download_url_to_file(
-                url="https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_large_patch4_window7_224_22k.pth",
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url = "https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_large_patch4_window7_224_22k.pth"
+
+            checkpoint = load_state_dict_from_url(url=url,
+                                                  model_dir="/out",
+                                                  map_location="cpu")
             model.load_state_dict(checkpoint["model"], strict=False)
             print('Load the backbone pretrained on ImageNet 22K')
         else:

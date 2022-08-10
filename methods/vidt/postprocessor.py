@@ -36,7 +36,7 @@ class PostProcess(nn.Module):
     assert len(out_logits) == len(target_sizes)
     assert target_sizes.shape[1] == 2
 
-    if self.dataset_file == 'coco':
+    if self.dataset_file in ['coco', 'ymir']:
       prob = out_logits.sigmoid()
       topk_values, topk_indexes = torch.topk(prob.view(out_logits.shape[0], -1), 100, dim=1)
       scores = topk_values
@@ -75,4 +75,6 @@ class PostProcess(nn.Module):
         true_boxes.append(true_box * scale_fct)
 
       return results, true_boxes
+    else:
+      raise Exception(f"Invalid dataset_file format {self.dataset_file_format}")
 

@@ -1,0 +1,5 @@
+*.pth
+__pycache__
+*.egg-info
+ops/build
+ops/dist

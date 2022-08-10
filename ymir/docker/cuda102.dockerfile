@@ -12,4 +12,5 @@ apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A4B469963BF863CC
 apt update && apt install -y git
 cd /app/ops && bash make.sh
 cd /app && pip install -r requirements.txt
+pip install "git+https://github.com/yzbx/ymir-executor-sdk.git@ymir1.0.0"
 EOF
