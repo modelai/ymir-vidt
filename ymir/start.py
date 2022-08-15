@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from ymir_exc import monitor
-from ymir_exc.util import get_merged_config, get_ymir_process, YmirStage
+from ymir_exc.util import YmirStage, get_merged_config, get_ymir_process
 
 
 def start() -> int:

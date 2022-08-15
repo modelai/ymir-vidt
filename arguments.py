@@ -7,6 +7,7 @@
 
 import argparse
 
+
 def str2bool(v, bool):
 
     if isinstance(v, bool):
@@ -77,8 +78,9 @@ def get_args_parser():
     parser.add_argument('--remove_difficult', action='store_true')
 
     # * Device and Log
-    parser.add_argument('--output_dir', default='',
+    parser.add_argument('--output_dir', default='/out/models',
                         help='path where to save, empty for no saving')
+    parser.add_argument('--tensorboard_dir', default='/out/tensorboard', help='path to save tensorboard logs')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
@@ -86,6 +88,8 @@ def get_args_parser():
                         help='start epoch')
     parser.add_argument('--eval', default=False, type=lambda x: (str(x).lower() == 'true'), help='eval mode')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--load_from', default='', help='load from checkpoint, not work with --resume')
+    parser.add_argument('--save_interval', default=100, type=int, help='the interval to save the checkpoint')
 
     # * Training setup
     parser.add_argument('--dist-url', default='tcp://127.0.0.1:3457', type=str,

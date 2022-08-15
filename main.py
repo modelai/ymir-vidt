@@ -16,7 +16,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader, DistributedSampler
+from ymir_exc import monitor
+from ymir_exc.util import (YmirStage, get_merged_config, get_ymir_process,
+                           write_ymir_training_result)
 
 import datasets
 import util.misc as utils
@@ -29,11 +33,14 @@ from util.scheduler import create_scheduler
 
 def build_distil_model(args):
     """ build a teacher model """
-    assert args.distil_model in ['vidt_nano', 'vidt_tiny', 'vidt_small', 'vidt_base']
+    assert args.distil_model in ['vidt_nano',
+                                 'vidt_tiny', 'vidt_small', 'vidt_base']
     return build_model(args, is_teacher=True)
+
 
 def main(args):
     """ main function to train a ViDT model """
+    cfg = get_merged_config()
 
     rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
@@ -41,7 +48,8 @@ def main(args):
     # Gradient accumulation setup
     if args.n_iter_to_acc > 1:
         if args.batch_size % args.n_iter_to_acc != 0:
-            raise Exception(f"Not supported divisor for acc grade with batch size {args.batch_size} and n_iter_to_acc {args.n_iter_to_acc}")
+            raise Exception(
+                f"Not supported divisor for acc grade with batch size {args.batch_size} and n_iter_to_acc {args.n_iter_to_acc}")
 
         print("Gradient Accumulation is applied.")
         print("The batch: ", args.batch_size, "->", int(args.batch_size / args.n_iter_to_acc),
@@ -69,12 +77,13 @@ def main(args):
     # if distil_mode is specified, load a teacher model fron a url or local path
     teacher_model = None
     if args.distil_model is not None:
-        print("Distillation On -- Model:", args.distil_model, "Path:", args.distil_model_path)
+        print("Distillation On -- Model:", args.distil_model,
+              "Path:", args.distil_model_path)
         teacher_model = build_distil_model(args)
 
         if 'http' in args.distil_model_path or 'https' in args.distil_model_path:
             # load from a url
-            url=args.distil_model_path
+            url = args.distil_model_path
             filename = os.path.basename(url)
             model_dir = '/out'
             filepath = os.path.join(model_dir, filename)
@@ -94,20 +103,24 @@ def main(args):
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model,
-                                                          device_ids=[args.gpu],
+                                                          device_ids=[
+                                                              args.gpu],
                                                           find_unused_parameters=True)
         model_without_ddp = model.module
 
         if teacher_model is not None:
             teacher_model = torch.nn.parallel.DistributedDataParallel(teacher_model,
-                                                                      device_ids=[args.gpu],
+                                                                      device_ids=[
+                                                                          args.gpu],
                                                                       find_unused_parameters=True)
 
     # print parameter info.
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_parameters = sum(p.numel()
+                       for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
     if teacher_model is not None:
-        n_parameters = sum(p.numel() for p in teacher_model.parameters() if p.requires_grad)
+        n_parameters = sum(p.numel()
+                           for p in teacher_model.parameters() if p.requires_grad)
         print('number of params for teacher:', n_parameters)
 
     # optimizer setup
@@ -132,10 +145,12 @@ def main(args):
         ]
 
         # print the total number of trainable params.
-        n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        n_parameters = sum(p.numel()
+                           for p in model.parameters() if p.requires_grad)
         print('num of total trainable prams:' + str(n_parameters))
 
-        optimizer = torch.optim.AdamW(param_dicts, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(
+            param_dicts, lr=args.lr, weight_decay=args.weight_decay)
         return optimizer
 
     # build an optiimzer along with a learning scheduler
@@ -143,7 +158,8 @@ def main(args):
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
     # build data loader
-    dataset_train, dataset_val = build_dataset(image_set=['train', 'val'], args=args)
+    dataset_train, dataset_val = build_dataset(
+        image_set=['train', 'val'], args=args)
     print("# train:", len(dataset_train), ", # val", len(dataset_val))
 
     # data samplers
@@ -171,8 +187,20 @@ def main(args):
 
     output_dir = Path(args.output_dir)
 
+    # finetune from a checkpoint
+    if args.load_from:
+        if args.resume:
+            raise Exception("cannot load from and resume at the same time")
+
+        if args.load_from.startswith('https'):
+            checkpoint = torch.hub.load_state_dict_from_url(
+                args.load_from, map_location='cpu', check_hash=True)
+        else:
+            checkpoint = torch.load(args.load_from, map_location='cpu')
+        model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
+        print('load a checkpoint from', args.load_from)
     # resume from a checkpoint or eval with a checkpoint
-    if args.resume:
+    elif args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.resume, map_location='cpu', check_hash=True)
@@ -191,13 +219,15 @@ def main(args):
                                               data_loader_val, base_ds, device)
 
         if args.output_dir:
-            utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
+            utils.save_on_master(
+                coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
 
     print("Start training")
     start_time = time.time()
+    if args.output_dir and utils.is_main_process():
+        tb_writer = SummaryWriter(args.tensorboard_dir)
     for epoch in range(args.start_epoch, args.epochs):
-
         # specify the current epoch number for samplers
         if args.distributed:
             sampler_train.set_epoch(epoch)
@@ -219,7 +249,8 @@ def main(args):
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 100 epochs
             if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+                checkpoint_paths.append(
+                    output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
                     'model': model_without_ddp.state_dict(),
@@ -239,6 +270,29 @@ def main(args):
                      'epoch': epoch,
                      'n_parameters': n_parameters}
         if args.output_dir and utils.is_main_process():
+            percent = get_ymir_process(stage=YmirStage.TASK, p=(
+                epoch - args.start_epoch + 1) / (args.epochs - args.start_epoch + 1))
+            monitor.write_monitor_logger(percent=percent)
+
+            map50 = test_stats['coco_eval_bbox'][1]
+            write_ymir_training_result(
+                cfg, map50, files=[str(checkpoint_paths[-1])], id=f'epoch{epoch}')
+
+            for tag in ['lr', 'loss', 'class_error', 'loss_ce', 'loss_bbox', 'loss_giou']:
+                if tag in train_stats:
+                    tb_writer.add_scalar(
+                        tag=f'train/{tag}', scalar_value=train_stats[tag], global_step=epoch)
+                if tag in test_stats:
+                    tb_writer.add_scalar(
+                        tag=f'test/{tag}', scalar_value=test_stats[tag], global_step=epoch)
+            for tag, value in zip(['map', 'map50', 'map75',
+                                   'small-map', 'medium-map', 'large-map',
+                                   'mar-1', 'mar-10', 'mar-100',
+                                   'small-mar', 'medium-mar', 'large-mar'
+                                   ], test_stats['coco_eval_bbox']):
+                tb_writer.add_scalar(
+                    tag=f'test/{tag}', scalar_value=value, global_step=epoch)
+
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
@@ -253,6 +307,8 @@ def main(args):
                         torch.save(coco_evaluator.coco_eval["bbox"].eval,
                                    output_dir / "eval" / name)
 
+    if args.output_dir and utils.is_main_process():
+        tb_writer.close()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
@@ -260,7 +316,8 @@ def main(args):
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser('ViDT training and evaluation script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser(
+        'ViDT training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
 
     ''' for testing
@@ -289,7 +346,7 @@ if __name__ == '__main__':
         args.output_dir += str(args.epochs) + '-'
         args.output_dir += str(args.batch_size)
         args.output_dir = args.method + '-' + args.backbone_name.upper() + '-batch-' + \
-                          str(args.batch_size) + '-epoch-' + str(args.epochs)
+            str(args.batch_size) + '-epoch-' + str(args.epochs)
 
     # make log directories
     if args.output_dir:
@@ -299,5 +356,3 @@ if __name__ == '__main__':
         print('log', args.output_dir)
 
     main(args)
-
-
