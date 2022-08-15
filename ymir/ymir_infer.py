@@ -2,11 +2,19 @@
 ymir infer task entry point
 """
 import os.path as osp
+import sys
+from typing import List
 
 import torch
-from easydict import Easydict as edict
-from ymir_exc.util import get_weight_files
+from easydict import EasyDict as edict
+from PIL import Image
+from ymir_exc import dataset_reader as dr
+from ymir_exc import env, monitor
+from ymir_exc import result_writer as rw
+from ymir_exc.util import (YmirStage, get_merged_config, get_weight_files,
+                           get_ymir_process)
 
+import datasets.transforms as T
 from methods.coat_w_ram import coat_lite_mini, coat_lite_small, coat_lite_tiny
 from methods.swin_w_ram import (swin_base_win7, swin_large_win7, swin_nano,
                                 swin_small, swin_tiny)
@@ -14,21 +22,21 @@ from methods.swin_w_ram import (swin_base_win7, swin_large_win7, swin_nano,
 
 def build_model(args):
     if args.backbone_name == 'swin_nano':
-        backbone, hidden_dim = swin_nano(pretrained=False)
+        backbone, hidden_dim = swin_nano(pretrained=None)
     elif args.backbone_name == 'swin_tiny':
-        backbone, hidden_dim = swin_tiny(pretrained=False)
+        backbone, hidden_dim = swin_tiny(pretrained=None)
     elif args.backbone_name == 'swin_small':
-        backbone, hidden_dim = swin_small(pretrained=False)
+        backbone, hidden_dim = swin_small(pretrained=None)
     elif args.backbone_name == 'swin_base_win7_22k':
-        backbone, hidden_dim = swin_base_win7(pretrained=False)
+        backbone, hidden_dim = swin_base_win7(pretrained=None)
     elif args.backbone_name == 'swin_large_win7_22k':
-        backbone, hidden_dim = swin_large_win7(pretrained=False)
+        backbone, hidden_dim = swin_large_win7(pretrained=None)
     elif args.backbone_name == 'coat_lite_tiny':
-        backbone, hidden_dim = coat_lite_tiny(pretrained=False)
+        backbone, hidden_dim = coat_lite_tiny(pretrained=None)
     elif args.backbone_name == 'coat_lite_mini':
-        backbone, hidden_dim = coat_lite_mini(pretrained=False)
+        backbone, hidden_dim = coat_lite_mini(pretrained=None)
     elif args.backbone_name == 'coat_lite_small':
-        backbone, hidden_dim = coat_lite_small(pretrained=False)
+        backbone, hidden_dim = coat_lite_small(pretrained=None)
     else:
         raise ValueError(f'backbone {args.backbone_name} not supported')
 
@@ -129,6 +137,9 @@ class YmirModel(object):
         self.task_idx = infer_task_idx
         self.task_num = task_num
 
+        self.conf_threshold = self.cfg.param.conf_threshold
+        self.class_names= self.cfg.param.class_names
+
     def init_detector(self):
         """
         build model and load weight
@@ -151,11 +162,65 @@ class YmirModel(object):
         self.model.to(self.device)
         self.model.eval()
 
+        self.preprocess = T.Compose([
+            T.RandomResize([512], max_size=800),
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
         self.postprocess = get_postprocessor(args)
 
-    def infer(self, img):
-        sample = img
-        img_h, img_w = img.shape[0:2]
-        orig_target_sizes = torch.tensor([[img_h, img_w]])
-        outputs = self.model(sample)
+    def infer(self, img: Image) -> List[rw.Annotation]:
+        sample, _ = self.preprocess(img, None)
+        img_w, img_h = img.size
+        orig_target_sizes = torch.tensor([[img_h, img_w]], device=self.device)
+        outputs = self.model([sample.to(self.device)])
+        # results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
         results = self.postprocess(outputs, orig_target_sizes)
+
+        anns=[]
+        # for batch
+        for r in results:
+            # for bbox
+            for conf, cls, (xmin, ymin, xmax, ymax)  in zip(r['scores'], r['labels'], r['boxes']):
+                if conf < self.conf_threshold:
+                    continue
+
+                ann = rw.Annotation(class_name=self.class_names[int(cls)], score=conf, box=rw.Box(
+                    x=int(xmin), y=int(ymin), w=int(xmax - xmin), h=int(ymax - ymin)))
+
+                anns.append(ann)
+        return anns
+
+def main() -> int:
+    cfg = get_merged_config()
+    model = YmirModel(cfg)
+    task_idx = model.task_idx
+    task_num = model.task_num
+    monitor.write_monitor_logger(percent=get_ymir_process(
+        stage=YmirStage.PREPROCESS, p=1.0, task_idx=task_idx, task_num=task_num))
+
+    N = dr.items_count(env.DatasetType.CANDIDATE)
+    infer_result = {}
+
+    idx = -1
+
+    monitor_gap = max(1, N // 1000)
+    for asset_path, _ in dr.item_paths(dataset_type=env.DatasetType.CANDIDATE):
+        # img = cv2.imread(asset_path)
+        img = Image.open(asset_path).convert('RGB')
+        result = model.infer(img)
+        infer_result[asset_path] = result
+        idx += 1
+
+        if idx % monitor_gap == 0:
+            percent = get_ymir_process(
+                stage=YmirStage.TASK, p=idx / N, task_idx=task_idx, task_num=task_num)
+            monitor.write_monitor_logger(percent=percent)
+
+    rw.write_infer_result(infer_result=infer_result)
+    monitor.write_monitor_logger(percent=get_ymir_process(
+        stage=YmirStage.PREPROCESS, p=1.0, task_idx=task_idx, task_num=task_num))
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())

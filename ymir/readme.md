@@ -87,6 +87,10 @@ if args.load_from:
     print('load a checkpoint from', args.load_from)
 ```
 
+### ymir infer support
+
+
+
 ## thanks to
 
 - [detr](https://github.com/facebookresearch/detr)

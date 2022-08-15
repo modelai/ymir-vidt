@@ -5,3 +5,5 @@ cython
 # onnxruntime
 timm
 einops
+opencv_python
+nptyping

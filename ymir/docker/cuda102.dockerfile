@@ -20,7 +20,7 @@ RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machi
 
 RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
 pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-apt update && apt install -y git vim && rm -rf /var/lib/apt/lists/* && \
+apt update && apt install -y git vim libgl1-mesa-glx ffmpeg libsm6 libxext6 ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 && rm -rf /var/lib/apt/lists/* && \
 mkdir -p /img-man && echo "python3 ymir/start.py" > /usr/bin/start.sh
 
 COPY . /app

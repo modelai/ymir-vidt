@@ -16,6 +16,6 @@ def build(image_set, args):
         img_folder = data_info[split]['img_dir']
         ann_file = data_info[split]['ann_file']
         dataset = CocoDetection(split, img_folder, ann_file,
-            transforms=make_coco_transforms(split), return_masks=False)
+            transforms=make_coco_transforms(split, args), return_masks=False)
         datasets.append(dataset)
     return datasets
