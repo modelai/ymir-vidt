@@ -1,5 +1,4 @@
 import logging
-import os
 import subprocess
 import sys
 
@@ -47,7 +46,8 @@ def _run_mining(task_idx: int = 0, task_num: int = 1) -> None:
     logging.info(f'mining: {command}')
     subprocess.run(command.split(), check=True)
     monitor.write_monitor_logger(percent=get_ymir_process(
-        stage=YmirStage.POSTPROCESS, p=1, task_idx=task_idx, task_num=task_num))
+        stage=YmirStage.POSTPROCESS, p=1, task_idx=task_idx,
+        task_num=task_num))
 
 
 def _run_infer(task_idx: int = 0, task_num: int = 1) -> None:
@@ -55,7 +55,8 @@ def _run_infer(task_idx: int = 0, task_num: int = 1) -> None:
     logging.info(f'infer: {command}')
     subprocess.run(command.split(), check=True)
     monitor.write_monitor_logger(percent=get_ymir_process(
-        stage=YmirStage.POSTPROCESS, p=1, task_idx=task_idx, task_num=task_num))
+        stage=YmirStage.POSTPROCESS, p=1, task_idx=task_idx,
+        task_num=task_num))
 
 
 if __name__ == '__main__':

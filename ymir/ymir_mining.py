@@ -23,6 +23,7 @@ from ymir.ymir_infer import YmirModel
 BBOX = NDArray[Shape['*,4'], Any]
 CV_IMAGE = NDArray[Shape['*,*,3'], UInt8]
 
+
 def intersect(boxes1: BBOX, boxes2: BBOX) -> NDArray:
     '''
         Find intersection of every box combination between two sets of box
@@ -34,11 +35,13 @@ def intersect(boxes1: BBOX, boxes2: BBOX) -> NDArray:
     '''
     n1 = boxes1.shape[0]
     n2 = boxes2.shape[0]
-    max_xy = np.minimum(np.expand_dims(boxes1[:, 2:], axis=1).repeat(n2, axis=1),
-                        np.expand_dims(boxes2[:, 2:], axis=0).repeat(n1, axis=0))
+    max_xy = np.minimum(
+        np.expand_dims(boxes1[:, 2:], axis=1).repeat(n2, axis=1),
+        np.expand_dims(boxes2[:, 2:], axis=0).repeat(n1, axis=0))
 
-    min_xy = np.maximum(np.expand_dims(boxes1[:, :2], axis=1).repeat(n2, axis=1),
-                        np.expand_dims(boxes2[:, :2], axis=0).repeat(n1, axis=0))
+    min_xy = np.maximum(
+        np.expand_dims(boxes1[:, :2], axis=1).repeat(n2, axis=1),
+        np.expand_dims(boxes2[:, :2], axis=0).repeat(n1, axis=0))
     inter = np.clip(max_xy - min_xy, a_min=0, a_max=None)  # (n1, n2, 2)
     return inter[:, :, 0] * inter[:, :, 1]  # (n1, n2)
 
@@ -61,8 +64,12 @@ def horizontal_flip(image: CV_IMAGE, bbox: BBOX) \
     return image, bbox
 
 
-def cutout(image: CV_IMAGE, bbox: BBOX, cut_num: int = 2, fill_val: int = 0,
-           bbox_remove_thres: float = 0.4, bbox_min_thres: float = 0.1) -> Tuple[CV_IMAGE, BBOX]:
+def cutout(image: CV_IMAGE,
+           bbox: BBOX,
+           cut_num: int = 2,
+           fill_val: int = 0,
+           bbox_remove_thres: float = 0.4,
+           bbox_min_thres: float = 0.1) -> Tuple[CV_IMAGE, BBOX]:
     '''
         Cutout augmentation
         image: A PIL image
@@ -92,7 +99,9 @@ def cutout(image: CV_IMAGE, bbox: BBOX, cut_num: int = 2, fill_val: int = 0,
         top = random.uniform(0, original_h - cutout_size_h)
         bottom = top + cutout_size_h
         cutout = np.array(
-            [[float(left), float(top), float(right), float(bottom)]])
+            [[float(left),
+              float(top), float(right),
+              float(bottom)]])
 
         # Calculate intersect between cutout and bounding boxes
         overlap_size = intersect(cutout, bbox)
@@ -109,7 +118,9 @@ def cutout(image: CV_IMAGE, bbox: BBOX, cut_num: int = 2, fill_val: int = 0,
     return image, bbox
 
 
-def rotate(image: CV_IMAGE, bbox: BBOX, rot: float = 5) -> Tuple[CV_IMAGE, BBOX]:
+def rotate(image: CV_IMAGE,
+           bbox: BBOX,
+           rot: float = 5) -> Tuple[CV_IMAGE, BBOX]:
     image = image.copy()
     bbox = bbox.copy()
     h, w, c = image.shape
@@ -143,7 +154,8 @@ def get_dir(src_point: NDArray, rot_rad: float) -> List:
     return src_result
 
 
-def transform_preds(coords: NDArray, center: NDArray, scale: Any, rot: float, output_size: List) -> NDArray:
+def transform_preds(coords: NDArray, center: NDArray, scale: Any, rot: float,
+                    output_size: List) -> NDArray:
     trans = get_affine_transform(center, scale, rot, output_size, inv=True)
     target_coords = affine_transform(coords, trans)
     return target_coords
@@ -191,7 +203,9 @@ def affine_transform(pt: NDArray, t: NDArray) -> NDArray:
     return new_pt[:2]
 
 
-def resize(img: CV_IMAGE, boxes: BBOX, ratio: float = 0.8) -> Tuple[CV_IMAGE, BBOX]:
+def resize(img: CV_IMAGE,
+           boxes: BBOX,
+           ratio: float = 0.8) -> Tuple[CV_IMAGE, BBOX]:
     """
     ratio: <= 1.0
     """
@@ -241,6 +255,7 @@ def split_result(result: NDArray) -> Tuple[BBOX, NDArray, NDArray]:
 
 
 class YmirMining(YmirModel):
+
     def __init__(self, cfg: edict):
         super().__init__(cfg)
         # for multiple tasks, mining first, then infer
@@ -259,7 +274,8 @@ class YmirMining(YmirModel):
         idx = -1
         beta = 1.3
         mining_result = []
-        for asset_path, _ in tqdm(dr.item_paths(dataset_type=env.DatasetType.CANDIDATE)):
+        for asset_path, _ in tqdm(
+                dr.item_paths(dataset_type=env.DatasetType.CANDIDATE)):
             # img = cv2.imread(asset_path)
             img = cv2.imread(asset_path)
             # xyxy,conf,cls
@@ -298,10 +314,10 @@ class YmirMining(YmirModel):
                     consistency_box = max_iou
                     consistency_cls = 0.5 * \
                         (conf[origin_idx] + conf_key[aug_idx]) * (1 - js)
-                    consistency_per_inst = abs(
-                        consistency_box + consistency_cls - beta)
-                    consistency_per_aug = min(
-                        consistency_per_aug, consistency_per_inst.item())
+                    consistency_per_inst = abs(consistency_box +
+                                               consistency_cls - beta)
+                    consistency_per_aug = min(consistency_per_aug,
+                                              consistency_per_inst.item())
 
                     consistency += consistency_per_aug
 
@@ -311,8 +327,10 @@ class YmirMining(YmirModel):
             idx += 1
 
             if idx % monitor_gap == 0:
-                percent = get_ymir_process(
-                    stage=YmirStage.TASK, p=idx / N, task_idx=self.task_idx, task_num=self.task_num)
+                percent = get_ymir_process(stage=YmirStage.TASK,
+                                           p=idx / N,
+                                           task_idx=self.task_idx,
+                                           task_num=self.task_num)
                 monitor.write_monitor_logger(percent=percent)
 
         return mining_result
@@ -338,7 +356,9 @@ class YmirMining(YmirModel):
         else:
             return np.array(xyxy_conf_idx_list, dtype=np.float32)
 
-    def aug_predict(self, image: CV_IMAGE, bboxes: BBOX) -> Tuple[Dict[str, BBOX], Dict[str, NDArray]]:
+    def aug_predict(
+            self, image: CV_IMAGE,
+            bboxes: BBOX) -> Tuple[Dict[str, BBOX], Dict[str, NDArray]]:
         """
         for different augmentation methods: flip, cutout, rotate and resize
             augment the image and bbox and use model to predict them.
@@ -369,7 +389,9 @@ def main():
     rw.write_mining_result(mining_result=mining_result)
 
     percent = get_ymir_process(stage=YmirStage.POSTPROCESS,
-                               p=1, task_idx=miner.task_idx, task_num=miner.task_num)
+                               p=1,
+                               task_idx=miner.task_idx,
+                               task_num=miner.task_num)
     monitor.write_monitor_logger(percent=percent)
     return 0
 

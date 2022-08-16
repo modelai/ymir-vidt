@@ -13,7 +13,7 @@ def main(cfg: edict) -> int:
     num_gpus = len(cfg.param.gpu_id.split(','))
     models_dir = cfg.ymir.output.models_dir
     tensorboard_dir = cfg.ymir.output.tensorboard_dir
-    args_options = cfg.param.get('args_options','')
+    args_options = cfg.param.get('args_options', '')
     num_classes = len(cfg.param.class_names)
     batch_size = int(cfg.param.batch_size)
     eval_size = int(cfg.param.eval_size)
@@ -47,12 +47,15 @@ def main(cfg: edict) -> int:
 
     # finetune from offered weight file
     weight_files = get_weight_files(cfg, suffix=('.pth'))
-    weight_files = [f for f in weight_files if osp.basename(f).startswith('checkpoint')]
+    weight_files = [
+        f for f in weight_files if osp.basename(f).startswith('checkpoint')
+    ]
     if weight_files:
         latest_weight_file = max(weight_files, key=osp.getctime)
 
         # auto finetune if not specified by user.
-        if args_options.find('--load_from')== -1 and args_options.find('--resume')==-1:
+        if args_options.find('--load_from') == -1 and args_options.find(
+                '--resume') == -1:
             cmd = cmd + " --load_from " + latest_weight_file
 
     logging.info(f"Running command: {cmd}")
@@ -61,6 +64,7 @@ def main(cfg: edict) -> int:
     write_ymir_training_result(cfg, 0, [], 'last')
 
     return 0
+
 
 if __name__ == '__main__':
     cfg = get_merged_config()

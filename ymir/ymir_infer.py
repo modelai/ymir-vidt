@@ -48,6 +48,7 @@ def build_model(args):
         available_methods = ['vidt_wo_neck', 'vidt']
         raise ValueError(f'method {args.method} is not in {available_methods}')
 
+
 def build_vidt_model(args, backbone):
     from methods.vidt.deformable_transformer import \
         build_deforamble_transformer
@@ -61,7 +62,8 @@ def build_vidt_model(args, backbone):
 
     cross_scale_fusion = None
     if args.cross_scale_fusion:
-        cross_scale_fusion = FPNFusionModule(backbone.num_channels, fuse_dim=args.reduced_dim)
+        cross_scale_fusion = FPNFusionModule(backbone.num_channels,
+                                             fuse_dim=args.reduced_dim)
 
     deform_transformers = build_deforamble_transformer(args)
 
@@ -83,6 +85,7 @@ def build_vidt_model(args, backbone):
 
     return model
 
+
 def build_vidt_wo_neck_model(args, backbone):
     from methods.vidt_wo_neck.detector import Detector
 
@@ -99,6 +102,7 @@ def build_vidt_wo_neck_model(args, backbone):
 
     return model
 
+
 def get_postprocessor(args):
     if args.method == 'vidt':
         from methods.vidt.postprocessor import PostProcess as postprocess_vidt
@@ -111,7 +115,9 @@ def get_postprocessor(args):
         available_methods = ['vidt_wo_neck', 'vidt']
         raise ValueError(f'method {args.method} is not in {available_methods}')
 
+
 class YmirModel(object):
+
     def __init__(self, cfg: edict):
         """model for ymir infer task
 
@@ -138,14 +144,16 @@ class YmirModel(object):
         self.task_num = task_num
 
         self.conf_threshold = self.cfg.param.conf_threshold
-        self.class_names= self.cfg.param.class_names
+        self.class_names = self.cfg.param.class_names
 
     def init_detector(self):
         """
         build model and load weight
         """
         weight_files = get_weight_files(self.cfg, suffix=('.pth'))
-        weight_files = [f for f in weight_files if osp.basename(f).startswith('checkpoint')]
+        weight_files = [
+            f for f in weight_files if osp.basename(f).startswith('checkpoint')
+        ]
 
         if len(weight_files) == 0:
             raise Exception('No weight files specified')
@@ -177,27 +185,36 @@ class YmirModel(object):
         # results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
         results = self.postprocess(outputs, orig_target_sizes)
 
-        anns=[]
+        anns = []
         # for batch
         for r in results:
             # for bbox
-            for conf, cls, (xmin, ymin, xmax, ymax)  in zip(r['scores'], r['labels'], r['boxes']):
+            for conf, cls, (xmin, ymin, xmax,
+                            ymax) in zip(r['scores'], r['labels'], r['boxes']):
                 if conf < self.conf_threshold:
                     continue
 
-                ann = rw.Annotation(class_name=self.class_names[int(cls)], score=conf, box=rw.Box(
-                    x=int(xmin), y=int(ymin), w=int(xmax - xmin), h=int(ymax - ymin)))
+                ann = rw.Annotation(class_name=self.class_names[int(cls)],
+                                    score=conf,
+                                    box=rw.Box(x=int(xmin),
+                                               y=int(ymin),
+                                               w=int(xmax - xmin),
+                                               h=int(ymax - ymin)))
 
                 anns.append(ann)
         return anns
+
 
 def main() -> int:
     cfg = get_merged_config()
     model = YmirModel(cfg)
     task_idx = model.task_idx
     task_num = model.task_num
-    monitor.write_monitor_logger(percent=get_ymir_process(
-        stage=YmirStage.PREPROCESS, p=1.0, task_idx=task_idx, task_num=task_num))
+    monitor.write_monitor_logger(
+        percent=get_ymir_process(stage=YmirStage.PREPROCESS,
+                                 p=1.0,
+                                 task_idx=task_idx,
+                                 task_num=task_num))
 
     N = dr.items_count(env.DatasetType.CANDIDATE)
     infer_result = {}
@@ -213,14 +230,20 @@ def main() -> int:
         idx += 1
 
         if idx % monitor_gap == 0:
-            percent = get_ymir_process(
-                stage=YmirStage.TASK, p=idx / N, task_idx=task_idx, task_num=task_num)
+            percent = get_ymir_process(stage=YmirStage.TASK,
+                                       p=idx / N,
+                                       task_idx=task_idx,
+                                       task_num=task_num)
             monitor.write_monitor_logger(percent=percent)
 
     rw.write_infer_result(infer_result=infer_result)
-    monitor.write_monitor_logger(percent=get_ymir_process(
-        stage=YmirStage.PREPROCESS, p=1.0, task_idx=task_idx, task_num=task_num))
+    monitor.write_monitor_logger(
+        percent=get_ymir_process(stage=YmirStage.PREPROCESS,
+                                 p=1.0,
+                                 task_idx=task_idx,
+                                 task_num=task_num))
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())
