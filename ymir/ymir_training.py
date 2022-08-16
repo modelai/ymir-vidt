@@ -51,7 +51,7 @@ def main(cfg: edict) -> int:
     if weight_files:
         latest_weight_file = max(weight_files, key=osp.getctime)
 
-        # auto finetune if not designed by user.
+        # auto finetune if not specified by user.
         if args_options.find('--load_from')== -1 and args_options.find('--resume')==-1:
             cmd = cmd + " --load_from " + latest_weight_file
 

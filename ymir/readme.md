@@ -89,7 +89,25 @@ if args.load_from:
 
 ### ymir infer support
 
+- view `ymir/ymir_infer.py` for detail
 
+- init model (view class `YmirModel.init_detector()`)
+    - build backbone
+    - build detector
+    - load weight file
+    - preprocess
+    - postprocess
+
+- infer (view class `YmirModel.infer()`)
+    - read image with `PIL.Image`
+    - obtain `conf_threshold` and `class_names` from `get_merged_config()`
+    - convert result to ymir format `rw.Anotation` and save infer result with `rw.write_infer_result()`
+
+### ymir mining support
+
+- view `ymir/ymir_mining.py` for detail
+
+- save mining result with `rw.write_mining_result()`
 
 ## thanks to
 

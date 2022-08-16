@@ -1,5 +1,8 @@
-FROM pytorch/pytorch:1.6.0-cuda10.1-cudnn7-devel
+ARG PYTORCH="1.6.0"
+ARG CUDA="10.1"
+ARG CUDNN="7"
 
+FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
 
 ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX"
 ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
@@ -12,6 +15,7 @@ ENV MKL_THREADING_LAYER="GNU"
 LABEL pytorch="1.6.0"
 LABEL cuda="10.1"
 LABEL cudnn="7"
+LABEL ymir="1.1.0"
 
 # To fix GPG key error when running apt-get update
 # apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A4B469963BF863CC
