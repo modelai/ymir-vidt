@@ -61,7 +61,7 @@ def main(cfg: edict) -> int:
     logging.info(f"Running command: {cmd}")
     subprocess.run(cmd.split(), check=True)
 
-    write_ymir_training_result(cfg, 0, [], 'last')
+    write_ymir_training_result(cfg, map50=0, files=[], id='last')
 
     return 0
 
