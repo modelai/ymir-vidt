@@ -18,6 +18,8 @@ ignore =
     N812,
     # N806 variable 'N' in function should be lowercase
     N806
+    N803
+    N813
 
 disable-noqa
 max-line-length = 121

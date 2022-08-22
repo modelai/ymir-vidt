@@ -5,8 +5,7 @@ import subprocess
 import sys
 
 from easydict import EasyDict as edict
-from ymir_exc.util import (get_merged_config, get_weight_files,
-                           write_ymir_training_result)
+from ymir_exc.util import get_merged_config, get_weight_files, write_ymir_training_result
 
 
 def main(cfg: edict) -> int:
