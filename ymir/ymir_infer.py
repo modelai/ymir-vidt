@@ -5,19 +5,16 @@ import os.path as osp
 import sys
 from typing import List
 
+import datasets.transforms as T
 import torch
 from easydict import EasyDict as edict
+from methods.coat_w_ram import coat_lite_mini, coat_lite_small, coat_lite_tiny
+from methods.swin_w_ram import swin_base_win7, swin_large_win7, swin_nano, swin_small, swin_tiny
 from PIL import Image
 from ymir_exc import dataset_reader as dr
 from ymir_exc import env, monitor
 from ymir_exc import result_writer as rw
-from ymir_exc.util import (YmirStage, get_merged_config, get_weight_files,
-                           get_ymir_process)
-
-import datasets.transforms as T
-from methods.coat_w_ram import coat_lite_mini, coat_lite_small, coat_lite_tiny
-from methods.swin_w_ram import (swin_base_win7, swin_large_win7, swin_nano,
-                                swin_small, swin_tiny)
+from ymir_exc.util import YmirStage, get_merged_config, get_weight_files, get_ymir_process
 
 
 def build_model(args):
@@ -50,8 +47,7 @@ def build_model(args):
 
 
 def build_vidt_model(args, backbone):
-    from methods.vidt.deformable_transformer import \
-        build_deforamble_transformer
+    from methods.vidt.deformable_transformer import build_deforamble_transformer
     from methods.vidt.detector import Detector
     from methods.vidt.fpn_fusion import FPNFusionModule
 
@@ -108,8 +104,7 @@ def get_postprocessor(args):
         from methods.vidt.postprocessor import PostProcess as postprocess_vidt
         return postprocess_vidt(args.dataset_file)
     elif args.method == 'vidt_wo_neck':
-        from methods.vidt_wo_neck.postprocessor import \
-            PostProcess as postprocess_vidt_wo_neck
+        from methods.vidt_wo_neck.postprocessor import PostProcess as postprocess_vidt_wo_neck
         return postprocess_vidt_wo_neck()
     else:
         available_methods = ['vidt_wo_neck', 'vidt']
