@@ -13,12 +13,11 @@ from nptyping import NDArray, Shape, UInt8
 from PIL import Image
 from scipy.stats import entropy
 from tqdm import tqdm
+from ymir.ymir_infer import YmirModel
 from ymir_exc import dataset_reader as dr
 from ymir_exc import env, monitor
 from ymir_exc import result_writer as rw
 from ymir_exc.util import YmirStage, get_merged_config, get_ymir_process
-
-from ymir.ymir_infer import YmirModel
 
 BBOX = NDArray[Shape['*,4'], Any]
 CV_IMAGE = NDArray[Shape['*,*,3'], UInt8]
@@ -299,7 +298,7 @@ class YmirMining(YmirModel):
                     p = cls_scores_aug[aug_idx]
                     q = cls_scores[origin_idx]
                     m = (p + q) / 2.
-                    js = 0.5 * entropy(p, m) + 0.5 * entropy(q, m)
+                    js = 0.5 * entropy([p, 1 - p], [m, 1 - m]) + 0.5 * entropy([q, 1 - q], [m, 1 - m])
                     if js < 0:
                         js = 0
                     consistency_box = max_iou
