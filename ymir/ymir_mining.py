@@ -15,9 +15,9 @@ from scipy.stats import entropy
 from tqdm import tqdm
 from ymir.ymir_infer import YmirModel
 from ymir_exc import dataset_reader as dr
-from ymir_exc import env, monitor
+from ymir_exc import env
 from ymir_exc import result_writer as rw
-from ymir_exc.util import YmirStage, get_merged_config, get_ymir_process
+from ymir_exc.util import YmirStage, get_merged_config, write_ymir_monitor_process
 
 BBOX = NDArray[Shape['*,4'], Any]
 CV_IMAGE = NDArray[Shape['*,*,3'], UInt8]
@@ -315,11 +315,7 @@ class YmirMining(YmirModel):
             idx += 1
 
             if idx % monitor_gap == 0:
-                percent = get_ymir_process(stage=YmirStage.TASK,
-                                           p=idx / N,
-                                           task_idx=self.task_idx,
-                                           task_num=self.task_num)
-                monitor.write_monitor_logger(percent=percent)
+                write_ymir_monitor_process(self.cfg, task='mining', naive_stage_percent=idx / N, stage=YmirStage.TASK)
 
         return mining_result
 
@@ -370,9 +366,7 @@ def main():
     miner = YmirMining(cfg)
     mining_result = miner.mining()
     rw.write_mining_result(mining_result=mining_result)
-
-    percent = get_ymir_process(stage=YmirStage.POSTPROCESS, p=1, task_idx=miner.task_idx, task_num=miner.task_num)
-    monitor.write_monitor_logger(percent=percent)
+    write_ymir_monitor_process(cfg, task='mining', naive_stage_percent=1, stage=YmirStage.POSTPROCESS)
     return 0
 
 

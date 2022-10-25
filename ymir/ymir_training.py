@@ -14,10 +14,11 @@ def main(cfg: edict) -> int:
     tensorboard_dir = cfg.ymir.output.tensorboard_dir
     args_options = cfg.param.get('args_options', '')
     num_classes = len(cfg.param.class_names)
-    batch_size = int(cfg.param.batch_size)
+    # gpu_count = len(cfg.param.get('gpu_id', '0').split(','))
+    batch_size = int(cfg.param.batch_size_per_gpu)
     eval_size = int(cfg.param.eval_size)
     epochs = int(cfg.param.epochs)
-    num_workers = int(cfg.param.num_workers)
+    num_workers = int(cfg.param.num_workers_per_gpu)
     learning_rate = float(cfg.param.learning_rate)
     backbone_name = str(cfg.param.backbone_name)
     weight_save_interval = int(cfg.param.weight_save_interval)

@@ -7,11 +7,12 @@
 # pretrained_model_params: []
 # class_names: []
 
-batch_size: 2
-num_workers: 2
+batch_size_per_gpu: 2
+num_workers_per_gpu: 2
 epochs: 50
 learning_rate: 0.0001
 eval_size: 640
 backbone_name: 'swin_nano'
 weight_save_interval: 100
 args_options: ''
+export_format: 'ark:raw'

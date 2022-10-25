@@ -12,9 +12,9 @@ from methods.coat_w_ram import coat_lite_mini, coat_lite_small, coat_lite_tiny
 from methods.swin_w_ram import swin_base_win7, swin_large_win7, swin_nano, swin_small, swin_tiny
 from PIL import Image
 from ymir_exc import dataset_reader as dr
-from ymir_exc import env, monitor
+from ymir_exc import env
 from ymir_exc import result_writer as rw
-from ymir_exc.util import YmirStage, get_merged_config, get_weight_files, get_ymir_process
+from ymir_exc.util import YmirStage, get_merged_config, get_weight_files, write_ymir_monitor_process
 
 
 def build_model(args):
@@ -127,17 +127,6 @@ class YmirModel(object):
         self.cfg = cfg
         self.init_detector()
 
-        # for multiple tasks, mining first, then infer
-        if cfg.ymir.run_mining and cfg.ymir.run_infer:
-            infer_task_idx = 1
-            task_num = 2
-        else:
-            infer_task_idx = 0
-            task_num = 1
-
-        self.task_idx = infer_task_idx
-        self.task_num = task_num
-
         self.conf_threshold = self.cfg.param.conf_threshold
         self.class_names = self.cfg.param.class_names
 
@@ -203,13 +192,7 @@ class YmirModel(object):
 def main() -> int:
     cfg = get_merged_config()
     model = YmirModel(cfg)
-    task_idx = model.task_idx
-    task_num = model.task_num
-    monitor.write_monitor_logger(
-        percent=get_ymir_process(stage=YmirStage.PREPROCESS,
-                                 p=1.0,
-                                 task_idx=task_idx,
-                                 task_num=task_num))
+    write_ymir_monitor_process(cfg, task='infer', naive_stage_percent=1.0, stage=YmirStage.PREPROCESS)
 
     N = dr.items_count(env.DatasetType.CANDIDATE)
     infer_result = {}
@@ -225,18 +208,10 @@ def main() -> int:
         idx += 1
 
         if idx % monitor_gap == 0:
-            percent = get_ymir_process(stage=YmirStage.TASK,
-                                       p=idx / N,
-                                       task_idx=task_idx,
-                                       task_num=task_num)
-            monitor.write_monitor_logger(percent=percent)
+            write_ymir_monitor_process(cfg, task='infer', naive_stage_percent=idx / N, stage=YmirStage.TASK)
 
     rw.write_infer_result(infer_result=infer_result)
-    monitor.write_monitor_logger(
-        percent=get_ymir_process(stage=YmirStage.PREPROCESS,
-                                 p=1.0,
-                                 task_idx=task_idx,
-                                 task_num=task_num))
+    write_ymir_monitor_process(cfg, task='infer', naive_stage_percent=1.0, stage=YmirStage.POSTPROCESS)
     return 0
 
 

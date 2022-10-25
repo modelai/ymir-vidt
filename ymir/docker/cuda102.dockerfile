@@ -33,6 +33,6 @@ WORKDIR /app
 RUN cd /app/ops && bash make.sh && \
     cd /app && pip install -r requirements.txt && \
     mv /app/ymir/img-man/*.yaml /img-man && \
-    pip install "git+https://github.com/yzbx/ymir-executor-sdk.git@ymir1.0.0"
+    pip install "git+https://github.com/modelai/ymir-executor-sdk.git@ymir1.3.0"
 
 CMD bash /usr/bin/start.sh
