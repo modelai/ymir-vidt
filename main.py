@@ -5,25 +5,29 @@
 # Additionally modified by NAVER Corp. for ViDT
 # ------------------------------------------------------------------------
 
-import os
+import argparse
 import datetime
 import json
+import os
 import random
+import resource
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
+from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader, DistributedSampler
-import resource
+from ymir_exc import monitor
+from ymir_exc.util import (YmirStage, get_merged_config, write_ymir_training_result, write_ymir_monitor_process)
+
 import datasets
 import util.misc as utils
+from arguments import get_args_parser
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch, train_one_epoch_with_teacher
 from methods import build_model
 from util.scheduler import create_scheduler
-from arguments import get_args_parser
-import argparse
 
 
 def build_distil_model(args):
@@ -31,8 +35,10 @@ def build_distil_model(args):
     assert args.distil_model in ['vidt_nano', 'vidt_tiny', 'vidt_small', 'vidt_base']
     return build_model(args, is_teacher=True)
 
+
 def main(args):
     """ main function to train a ViDT model """
+    cfg = get_merged_config()
 
     rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
@@ -40,18 +46,19 @@ def main(args):
     # Gradient accumulation setup
     if args.n_iter_to_acc > 1:
         if args.batch_size % args.n_iter_to_acc != 0:
-            print("Not supported divisor for acc grade.")
-            import sys
-            sys.exit(1)
+            raise Exception(
+                f"Not supported divisor for acc grade with batch size {args.batch_size} and n_iter_to_acc {args.n_iter_to_acc}"
+            )
+
         print("Gradient Accumulation is applied.")
-        print("The batch: ", args.batch_size, "->", int(args.batch_size / args.n_iter_to_acc),
-              'but updated every ', args.n_iter_to_acc, 'steps.')
+        print("The batch: ", args.batch_size, "->", int(args.batch_size / args.n_iter_to_acc), 'but updated every ',
+              args.n_iter_to_acc, 'steps.')
         args.batch_size = args.batch_size // args.n_iter_to_acc
     ##
 
     # distributed data parallel setup
     utils.init_distributed_mode(args)
-    print("git:\n  {}\n".format(utils.get_sha()))
+    # print("git:\n  {}\n".format(utils.get_sha()))
     print(args)
 
     device = torch.device(args.device)
@@ -74,11 +81,13 @@ def main(args):
 
         if 'http' in args.distil_model_path or 'https' in args.distil_model_path:
             # load from a url
-            torch.hub.download_url_to_file(
-                url=args.distil_model_path,
-                dst="checkpoint.pth"
-            )
-            checkpoint = torch.load("checkpoint.pth", map_location="cpu")
+            url = args.distil_model_path
+            filename = os.path.basename(url)
+            model_dir = '/out'
+            filepath = os.path.join(model_dir, filename)
+            if not os.path.exists(filepath):
+                torch.hub.download_url_to_file(url=url, dst=filepath)
+            checkpoint = torch.load(filepath, map_location='cpu')
             teacher_model.load_state_dict(checkpoint["model"])
         else:
             # load from a local path
@@ -91,9 +100,7 @@ def main(args):
     # parallel model setup
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model,
-                                                          device_ids=[args.gpu],
-                                                          find_unused_parameters=True)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
 
         if teacher_model is not None:
@@ -124,9 +131,18 @@ def main(args):
                 else:
                     backbone_decay.append(param)
         param_dicts = [
-            {"params": head},
-            {"params": backbone_no_decay, "weight_decay": 0., "lr": args.lr},
-            {"params": backbone_decay, "lr": args.lr},
+            {
+                "params": head
+            },
+            {
+                "params": backbone_no_decay,
+                "weight_decay": 0.,
+                "lr": args.lr
+            },
+            {
+                "params": backbone_decay,
+                "lr": args.lr
+            },
         ]
 
         # print the total number of trainable params.
@@ -141,8 +157,7 @@ def main(args):
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
     # build data loader
-    dataset_train = build_dataset(image_set='train', args=args)
-    dataset_val = build_dataset(image_set='val', args=args)
+    dataset_train, dataset_val = build_dataset(image_set=['train', 'val'], args=args)
     print("# train:", len(dataset_train), ", # val", len(dataset_val))
 
     # data samplers
@@ -153,13 +168,18 @@ def main(args):
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    batch_sampler_train = torch.utils.data.BatchSampler(
-        sampler_train, args.batch_size, drop_last=True)
+    batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, args.batch_size, drop_last=True)
 
-    data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
-                                   collate_fn=utils.collate_fn, num_workers=args.num_workers)
-    data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
-                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
+    data_loader_train = DataLoader(dataset_train,
+                                   batch_sampler=batch_sampler_train,
+                                   collate_fn=utils.collate_fn,
+                                   num_workers=args.num_workers)
+    data_loader_val = DataLoader(dataset_val,
+                                 args.batch_size,
+                                 sampler=sampler_val,
+                                 drop_last=False,
+                                 collate_fn=utils.collate_fn,
+                                 num_workers=args.num_workers)
 
     if args.dataset_file == "coco_panoptic":
         # We also evaluate AP during panoptic training, on original coco DS
@@ -170,11 +190,21 @@ def main(args):
 
     output_dir = Path(args.output_dir)
 
+    # finetune from a checkpoint
+    if args.load_from:
+        if args.resume:
+            raise Exception("cannot load from and resume at the same time")
+
+        if args.load_from.startswith('https'):
+            checkpoint = torch.hub.load_state_dict_from_url(args.load_from, map_location='cpu', check_hash=True)
+        else:
+            checkpoint = torch.load(args.load_from, map_location='cpu')
+        model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
+        print('load a checkpoint from', args.load_from)
     # resume from a checkpoint or eval with a checkpoint
-    if args.resume:
+    elif args.resume:
         if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
+            checkpoint = torch.hub.load_state_dict_from_url(args.resume, map_location='cpu', check_hash=True)
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
@@ -186,8 +216,7 @@ def main(args):
 
     # only evaluation purpose
     if args.eval:
-        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                              data_loader_val, base_ds, device)
+        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors, data_loader_val, base_ds, device)
 
         if args.output_dir:
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
@@ -195,8 +224,10 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
-    for epoch in range(args.start_epoch, args.epochs):
+    if args.output_dir and utils.is_main_process():
+        tb_writer = SummaryWriter(args.tensorboard_dir)
 
+    for epoch in range(args.start_epoch, args.epochs):
         # specify the current epoch number for samplers
         if args.distributed:
             sampler_train.set_epoch(epoch)
@@ -217,8 +248,9 @@ def main(args):
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 100 epochs
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+            if (epoch + 1) % args.lr_drop == 0 or (args.save_interval > 0 and (epoch + 1) % args.save_interval) == 0:
+                checkpoint_paths.append(
+                    output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
                     'model': model_without_ddp.state_dict(),
@@ -238,6 +270,32 @@ def main(args):
                      'epoch': epoch,
                      'n_parameters': n_parameters}
         if args.output_dir and utils.is_main_process():
+            percent = (epoch - args.start_epoch + 1) / (args.epochs - args.start_epoch + 1)
+            write_ymir_monitor_process(cfg, task='training', naive_stage_percent=percent, stage=YmirStage.TASK)
+
+            map50 = test_stats['coco_eval_bbox'][1]
+            if len(checkpoint_paths) == 1:
+                stage_id = 'vidt_last'
+            else:
+                stage_id = f'epoch_{epoch}'
+
+            write_ymir_training_result(cfg, map50, files=[str(checkpoint_paths[-1])], id=stage_id)
+
+            for tag in ['lr', 'loss', 'class_error', 'loss_ce', 'loss_bbox', 'loss_giou']:
+                if tag in train_stats:
+                    tb_writer.add_scalar(
+                        tag=f'train/{tag}', scalar_value=train_stats[tag], global_step=epoch)
+                if tag in test_stats:
+                    tb_writer.add_scalar(
+                        tag=f'test/{tag}', scalar_value=test_stats[tag], global_step=epoch)
+            for tag, value in zip(['map', 'map50', 'map75',
+                                   'small-map', 'medium-map', 'large-map',
+                                   'mar-1', 'mar-10', 'mar-100',
+                                   'small-mar', 'medium-mar', 'large-mar'
+                                   ], test_stats['coco_eval_bbox']):
+                tb_writer.add_scalar(
+                    tag=f'test/{tag}', scalar_value=value, global_step=epoch)
+
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
@@ -252,6 +310,8 @@ def main(args):
                         torch.save(coco_evaluator.coco_eval["bbox"].eval,
                                    output_dir / "eval" / name)
 
+    if args.output_dir and utils.is_main_process():
+        tb_writer.close()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
@@ -259,17 +319,32 @@ def main(args):
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser('ViDT training and evaluation script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser(
+        'ViDT training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
 
     ''' for testing
     args.method = 'vidt'
-    args.backbone_name = 'swin_tiny'
-    args.batch_size = 2
-    args.num_workers = 2
+    args.backbone_name = 'swin_nano'
+    args.batch_size = 4
+    args.num_workers = 4
     args.aux_loss = True
     args.with_box_refine = True
     args.output_dir = 'testing'
+    args.coco_path = '/mnt/ddn/datasets/COCO2017_Seg/train'
+
+    # seg
+    args.epff = True
+    args.token_label = False #True
+    args.iou_aware = False #True
+    args.with_vector = False #True
+    args.masks = False #True
+    args.vector_hidden_dim = 256 #1024
+    args.vector_loss_coef = 3.0
+    args.det_token_num = 300
+
+    args.resume = '/mnt/backbone-nfs/hwanjun/pami2022/optimized_checkpoints/vidt_plus_swin_nano_optimized.pth'
+    args.eval = True
     '''
 
     # set dim_feedforward differently
@@ -288,7 +363,7 @@ if __name__ == '__main__':
         args.output_dir += str(args.epochs) + '-'
         args.output_dir += str(args.batch_size)
         args.output_dir = args.method + '-' + args.backbone_name.upper() + '-batch-' + \
-                          str(args.batch_size) + '-epoch-' + str(args.epochs)
+            str(args.batch_size) + '-epoch-' + str(args.epochs)
 
     # make log directories
     if args.output_dir:
@@ -298,5 +373,3 @@ if __name__ == '__main__':
         print('log', args.output_dir)
 
     main(args)
-
-

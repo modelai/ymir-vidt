@@ -1,7 +1,9 @@
 scipy
 pycocotools
 cython
-onnx
-onnxruntime
+# onnx
+# onnxruntime
 timm
 einops
+opencv_python
+nptyping

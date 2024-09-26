@@ -4,6 +4,7 @@ Transforms and data augmentation for both image + bbox.
 """
 import random
 
+import numpy as np
 import PIL
 import torch
 import torchvision.transforms as T
@@ -11,7 +12,7 @@ import torchvision.transforms.functional as F
 
 from util.box_ops import box_xyxy_to_cxcywh
 from util.misc import interpolate
-import numpy as np
+
 
 def crop(image, target, region):
     cropped_image = F.crop(image, *region)
@@ -74,6 +75,9 @@ def hflip(image, target):
 
 
 def resize(image, target, size, max_size=None):
+    """
+    PIL image input
+    """
     # size can be min_size (scalar) or (w, h) tuple
     # import pdb;pdb.set_trace()
     maxs = size
@@ -142,7 +146,7 @@ def resize(image, target, size, max_size=None):
     if "masks" in target:
         target['masks'] = interpolate(
             target['masks'][:, None].float(), size, mode="nearest")[:, 0] > 0.5
-    
+
     # max_size = max(rescaled_image.size)
     # maxs = max(size)
     # padding_size = [maxs-rescaled_image.size[0], maxs-rescaled_image.size[1]]
@@ -270,6 +274,7 @@ class Normalize(object):
         target = target.copy()
         h, w = image.shape[-2:]
         if "boxes" in target:
+            target['xyxy_boxes'] = target["boxes"]
             boxes = target["boxes"]
             boxes = box_xyxy_to_cxcywh(boxes)
             boxes = boxes / torch.tensor([w, h, w, h], dtype=torch.float32)
